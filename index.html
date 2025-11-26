@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>Santa Drop (Prototype)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #02101f;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #fff;
+    }
+    .game-wrapper {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    #gameCanvas {
+      background: linear-gradient(#031c3a, #0a3158 60%, #0b3b22 60%, #06240f 100%);
+      border-radius: 8px;
+      max-width: 100vw;
+      max-height: calc(100vh - 110px);
+      touch-action: none;
+    }
+    .controls {
+      width: 100%;
+      max-width: 600px;
+      display: flex;
+      justify-content: space-around;
+      align-items: center;
+      padding: 8px 12px 12px;
+      gap: 16px;
+    }
+    .btn {
+      flex: 1;
+      min-height: 56px;
+      border-radius: 999px;
+      border: none;
+      background: #1f2937;
+      color: #f9fafb;
+      font-size: 1.1rem;
+      font-weight: 600;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .btn:active {
+      transform: translateY(2px);
+      box-shadow: 0 2px 5px rgba(0,0,0,0.4);
+      background: #374151;
+    }
+    .btn span.sub {
+      display: block;
+      font-size: 0.7rem;
+      opacity: 0.75;
+    }
+    @media (min-width: 800px) {
+      #gameCanvas {
+        max-width: 800px;
+        max-height: 450px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="game-wrapper">
+    <canvas id="gameCanvas"></canvas>
+    <div class="controls">
+      <button id="btnA" class="btn">
+        A / N
+        <span class="sub">短押し：プレゼント / 長押し：爆弾（予定）</span>
+      </button>
+      <button id="btnB" class="btn">
+        B / M
+        <span class="sub">上昇（押している間）</span>
+      </button>
+    </div>
+  </div>
+
+  <script>
+    // ====== 基本セットアップ ======
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    const btnA = document.getElementById('btnA');
+    const btnB = document.getElementById('btnB');
+
+    // 画面サイズ・座標系
+    let gameWidth = 800;
+    let gameHeight = 450;
+    let groundY = 380;
+
+    function resizeCanvas() {
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+
+      // 16:9 をベースに、上下にボタン分の余白を考慮
+      const maxCanvasHeight = vh - 110;
+      const ratio = 16 / 9;
+      let w = vw;
+      let h = w / ratio;
+      if (h > maxCanvasHeight) {
+        h = maxCanvasHeight;
+        w = h * ratio;
+      }
+
+      gameWidth = Math.floor(w);
+      gameHeight = Math.floor(h);
+      canvas.width = gameWidth;
+      canvas.height = gameHeight;
+      groundY = Math.floor(gameHeight * 0.85);
+
+      // サンタのX位置だけ、再計算
+      santa.x = gameWidth * 0.25;
+      if (!gameStarted) {
+        santa.y = gameHeight * 0.5;
+      }
+    }
+
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    // ====== ゲームオブジェクト ======
+
+    const SANTA_WIDTH = 64;
+    const SANTA_HEIGHT = 48;
+    const SANTA_HITBOX_INSET = 0.2; // 当たり判定を少し小さくする割合
+
+    const santa = {
+      x: gameWidth * 0.25,
+      y: gameHeight * 0.5,
+      vy: 0,
+    };
+
+    const physics = {
+      gravity: 0.25,
+      thrust: 0.4,
+      maxVy: 6,
+      scrollSpeed: 2,
+    };
+
+    // 建物
+    const buildings = [];
+
+    // projectile: プレゼント or 爆弾（今は見た目だけ）
+    let projectile = null;
+
+    // 入力状態
+    let inputA = false;
+    let inputB = false;
+    let aPressedAt = 0;
+
+    // ゲーム状態
+    let gameOver = false;
+    let gameStarted = false;
+    let score = 0;
+
+    // ====== ユーティリティ ======
+
+    function clamp(v, min, max) {
+      return v < min ? min : (v > max ? max : v);
+    }
+
+    function rectsIntersect(a, b) {
+      return !(
+        a.x + a.w < b.x ||
+        a.x > b.x + b.w ||
+        a.y + a.h < b.y ||
+        a.y > b.y + b.h
+      );
+    }
+
+    // サンタの当たり判定（PNG差し替え時もこのサイズを基準にすればOK）
+    function getSantaHitbox() {
+      const insetX = SANTA_WIDTH * SANTA_HITBOX_INSET;
+      const insetY = SANTA_HEIGHT * SANTA_HITBOX_INSET;
+      return {
+        x: santa.x - SANTA_WIDTH / 2 + insetX,
+        y: santa.y - SANTA_HEIGHT / 2 + insetY,
+        w: SANTA_WIDTH - insetX * 2,
+        h: SANTA_HEIGHT - insetY * 2,
+      };
+    }
+
+    // ====== 入力処理 ======
+
+    function setButtonA(pressed) {
+      if (pressed) {
+        if (!inputA && !projectile) {
+          aPressedAt = performance.now();
+        }
+        inputA = true;
+      } else {
+        if (inputA && !projectile) {
+          const duration = performance.now() - aPressedAt;
+          spawnProjectile(duration >= 500); // trueなら爆弾扱い（今は見た目だけ）
+        }
+        inputA = false;
+      }
+    }
+
+    function setButtonB(pressed) {
+      inputB = pressed;
+    }
+
+    // キーボード
+    window.addEventListener('keydown', (e) => {
+      if (e.repeat) return;
+      if (e.key === 'n' || e.key === 'N') {
+        setButtonA(true);
+      } else if (e.key === 'm' || e.key === 'M') {
+        setButtonB(true);
+      } else if (e.key === ' ' && gameOver) {
+        restartGame();
+      }
+    });
+
+    window.addEventListener('keyup', (e) => {
+      if (e.key === 'n' || e.key === 'N') {
+        setButtonA(false);
+      } else if (e.key === 'm' || e.key === 'M') {
+        setButtonB(false);
+      }
+    });
+
+    // タッチ / マウス（A）
+    const addPressEvents = (element, onPressChange) => {
+      const down = (ev) => {
+        ev.preventDefault();
+        onPressChange(true);
+      };
+      const up = (ev) => {
+        ev.preventDefault();
+        onPressChange(false);
+      };
+      element.addEventListener('pointerdown', down);
+      element.addEventListener('pointerup', up);
+      element.addEventListener('pointerleave', up);
+      element.addEventListener('pointercancel', up);
+    };
+
+    addPressEvents(btnA, setButtonA);
+    addPressEvents(btnB, setButtonB);
+
+    // ====== Projectile ======
+
+    function spawnProjectile(isBomb) {
+      // 画面内に1つだけ
+      if (projectile) return;
+      gameStarted = true;
+
+      const speedX = 4;
+      const speedY = -3; // 最初はちょっと上向き
+
+      projectile = {
+        x: santa.x + SANTA_WIDTH * 0.3,
+        y: santa.y - SANTA_HEIGHT * 0.1,
+        vx: speedX,
+        vy: speedY,
+        isBomb,
+      };
+    }
+
+    function updateProjectile() {
+      if (!projectile) return;
+      projectile.x += projectile.vx;
+      projectile.y += projectile.vy;
+      projectile.vy += physics.gravity * 0.5; // プレゼント落下重力
+
+      // 地面下 or 画面外に出たら消す
+      if (
+        projectile.x > gameWidth + 50 ||
+        projectile.y > gameHeight + 50
+      ) {
+        projectile = null;
+      }
+    }
+
+    // ====== 建物生成・更新 ======
+
+    function spawnBuilding() {
+      const minW = 60;
+      const maxW = 140;
+      const minH = 80;
+      const maxH = 220;
+
+      const w = minW + Math.random() * (maxW - minW);
+      const h = minH + Math.random() * (maxH - minH);
+
+      const b = {
+        x: gameWidth + w,
+        w,
+        h,
+        y: groundY - h,
+      };
+      buildings.push(b);
+    }
+
+    function ensureBuildings() {
+      if (buildings.length === 0) {
+        spawnBuilding();
+      } else {
+        const last = buildings[buildings.length - 1];
+        if (last.x + last.w < gameWidth) {
+          spawnBuilding();
+        }
+      }
+    }
+
+    function updateBuildings() {
+      for (const b of buildings) {
+        b.x -= physics.scrollSpeed;
+      }
+      // 画面外のビルを削除
+      while (buildings.length && buildings[0].x + buildings[0].w < -50) {
+        buildings.shift();
+      }
+      ensureBuildings();
+    }
+
+    // ====== サンタ更新 ======
+
+    function updateSanta() {
+      if (inputB) {
+        santa.vy -= physics.thrust;
+      } else {
+        santa.vy += physics.gravity;
+      }
+      santa.vy = clamp(santa.vy, -physics.maxVy, physics.maxVy);
+      santa.y += santa.vy;
+
+      // 画面内にクランプ
+      const topLimit = 30;
+      const bottomLimit = groundY - SANTA_HEIGHT / 2;
+      santa.y = clamp(santa.y, topLimit, bottomLimit);
+      if (santa.y === topLimit || santa.y === bottomLimit) {
+        santa.vy = 0;
+      }
+    }
+
+    // ====== 衝突判定 ======
+
+    function checkCollisions() {
+      const h = getSantaHitbox();
+      for (const b of buildings) {
+        const rect = { x: b.x, y: b.y, w: b.w, h: b.h };
+        if (rectsIntersect(h, rect)) {
+          gameOver = true;
+          break;
+        }
+      }
+    }
+
+    // ====== 描画 ======
+
+    function drawBackground() {
+      // 空は CSS のグラデで塗ってあるけど、星とか追加したければここ
+      // 地面ライン
+      ctx.strokeStyle = "rgba(0,0,0,0.4)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, groundY + 0.5);
+      ctx.lineTo(gameWidth, groundY + 0.5);
+      ctx.stroke();
+    }
+
+    function drawBuildings() {
+      for (const b of buildings) {
+        ctx.fillStyle = "#111827";
+        ctx.fillRect(b.x, b.y, b.w, b.h);
+
+        // 窓っぽいドット（今はあくまで飾り）
+        const rows = 4;
+        const cols = 3;
+        const padX = 10;
+        const padY = 12;
+        const w = 10;
+        const h = 12;
+        for (let r = 0; r < rows; r++) {
+          for (let c = 0; c < cols; c++) {
+            const wx = b.x + padX + c * (w + 6);
+            const wy = b.y + padY + r * (h + 6);
+            if (wx + w < b.x + b.w - 6) {
+              ctx.fillStyle = "#fbbf24";
+              ctx.fillRect(wx, wy, w, h);
+            }
+          }
+        }
+      }
+    }
+
+    function drawSanta() {
+      // === PNGに差し替えるときはここを画像描画に変更 ===
+      // 例：
+      // ctx.drawImage(santaImage, santa.x - SANTA_WIDTH/2, santa.y - SANTA_HEIGHT/2, SANTA_WIDTH, SANTA_HEIGHT);
+
+      // プレースホルダー（赤いそり＋サンタの頭っぽい丸）
+      const left = santa.x - SANTA_WIDTH / 2;
+      const top = santa.y - SANTA_HEIGHT / 2;
+
+      // そり
+      ctx.fillStyle = "#b91c1c";
+      ctx.fillRect(left, top + SANTA_HEIGHT * 0.35, SANTA_WIDTH, SANTA_HEIGHT * 0.3);
+      ctx.fillStyle = "#7f1d1d";
+      ctx.fillRect(left, top + SANTA_HEIGHT * 0.6, SANTA_WIDTH, SANTA_HEIGHT * 0.15);
+
+      // サンタ頭
+      const headX = santa.x + SANTA_WIDTH * 0.15;
+      const headY = santa.y - SANTA_HEIGHT * 0.05;
+      const radius = SANTA_HEIGHT * 0.28;
+      ctx.fillStyle = "#fee2e2";
+      ctx.beginPath();
+      ctx.arc(headX, headY, radius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 帽子
+      ctx.fillStyle = "#dc2626";
+      ctx.beginPath();
+      ctx.moveTo(headX - radius * 0.6, headY - radius * 0.1);
+      ctx.lineTo(headX + radius * 0.9, headY - radius * 1.4);
+      ctx.lineTo(headX + radius * 0.4, headY + radius * 0.1);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = "#fee2e2";
+      ctx.beginPath();
+      ctx.arc(headX + radius * 0.9, headY - radius * 1.4, radius * 0.25, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    function drawProjectile() {
+      if (!projectile) return;
+      ctx.save();
+      if (projectile.isBomb) {
+        // 爆弾（仮）：黒い丸
+        ctx.fillStyle = "#111827";
+        ctx.beginPath();
+        ctx.arc(projectile.x, projectile.y, 8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#9ca3af";
+        ctx.fillRect(projectile.x - 1, projectile.y - 10, 2, 6);
+      } else {
+        // プレゼント（仮）：四角い箱
+        ctx.fillStyle = "#10b981";
+        ctx.fillRect(projectile.x - 7, projectile.y - 7, 14, 14);
+        ctx.strokeStyle = "#f9fafb";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(projectile.x, projectile.y - 7);
+        ctx.lineTo(projectile.x, projectile.y + 7);
+        ctx.moveTo(projectile.x - 7, projectile.y);
+        ctx.lineTo(projectile.x + 7, projectile.y);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    function drawHUD() {
+      ctx.fillStyle = "rgba(0,0,0,0.5)";
+      ctx.fillRect(8, 8, 140, 32);
+      ctx.fillStyle = "#e5e7eb";
+      ctx.font = "16px system-ui, sans-serif";
+      ctx.fillText("SCORE: " + score, 16, 30);
+
+      if (!gameStarted && !gameOver) {
+        ctx.fillStyle = "rgba(0,0,0,0.55)";
+        ctx.fillRect(gameWidth/2 - 160, gameHeight/2 - 40, 320, 80);
+        ctx.fillStyle = "#f9fafb";
+        ctx.textAlign = "center";
+        ctx.font = "18px system-ui, sans-serif";
+        ctx.fillText("A / N でプレゼント投下", gameWidth/2, gameHeight/2 - 8);
+        ctx.fillText("B / M で上昇（長押し）", gameWidth/2, gameHeight/2 + 16);
+        ctx.textAlign = "start";
+      }
+
+      if (gameOver) {
+        ctx.fillStyle = "rgba(0,0,0,0.7)";
+        ctx.fillRect(gameWidth/2 - 180, gameHeight/2 - 70, 360, 140);
+        ctx.fillStyle = "#fee2e2";
+        ctx.textAlign = "center";
+        ctx.font = "28px system-ui, sans-serif";
+        ctx.fillText("GAME OVER", gameWidth/2, gameHeight/2 - 20);
+        ctx.font = "18px system-ui, sans-serif";
+        ctx.fillText("スペース or 画面タップでリスタート", gameWidth/2, gameHeight/2 + 18);
+        ctx.textAlign = "start";
+      }
+    }
+
+    // ====== メインループ ======
+
+    let lastTime = performance.now();
+
+    function gameLoop(now) {
+      const dt = (now - lastTime) / 16.67; // 60fps基準
+      lastTime = now;
+
+      ctx.clearRect(0, 0, gameWidth, gameHeight);
+
+      if (!gameOver) {
+        updateSanta();
+        updateProjectile();
+        updateBuildings();
+        checkCollisions();
+      }
+
+      drawBackground();
+      drawBuildings();
+      drawProjectile();
+      drawSanta();
+      drawHUD();
+
+      requestAnimationFrame(gameLoop);
+    }
+
+    requestAnimationFrame(gameLoop);
+
+    // ====== リスタート ======
+
+    function restartGame() {
+      gameOver = false;
+      gameStarted = false;
+      score = 0;
+      santa.y = gameHeight * 0.5;
+      santa.vy = 0;
+      projectile = null;
+      buildings.length = 0;
+      ensureBuildings();
+    }
+
+    // 画面タップでリスタート
+    canvas.addEventListener('pointerdown', (e) => {
+      if (gameOver) {
+        e.preventDefault();
+        restartGame();
+      }
+    });
+
+    // 初期ビル生成
+    ensureBuildings();
+  </script>
+</body>
+</html>
