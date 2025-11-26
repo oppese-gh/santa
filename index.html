@@ -87,7 +87,6 @@
       </button>
     </div>
   </div>
-
   <script>
     // ====== 基本セットアップ ======
     const canvas = document.getElementById('gameCanvas');
@@ -100,36 +99,6 @@
     let gameWidth = 800;
     let gameHeight = 450;
     let groundY = 380;
-
-    function resizeCanvas() {
-      const vw = window.innerWidth;
-      const vh = window.innerHeight;
-
-      // 16:9 をベースに、上下にボタン分の余白を考慮
-      const maxCanvasHeight = vh - 110;
-      const ratio = 16 / 9;
-      let w = vw;
-      let h = w / ratio;
-      if (h > maxCanvasHeight) {
-        h = maxCanvasHeight;
-        w = h * ratio;
-      }
-
-      gameWidth = Math.floor(w);
-      gameHeight = Math.floor(h);
-      canvas.width = gameWidth;
-      canvas.height = gameHeight;
-      groundY = Math.floor(gameHeight * 0.85);
-
-      // サンタのX位置だけ、再計算
-      santa.x = gameWidth * 0.25;
-      if (!gameStarted) {
-        santa.y = gameHeight * 0.5;
-      }
-    }
-
-    window.addEventListener('resize', resizeCanvas);
-    resizeCanvas();
 
     // ====== ゲームオブジェクト ======
 
@@ -166,6 +135,38 @@
     let gameStarted = false;
     let score = 0;
 
+    // ====== 画面リサイズ ======
+
+    function resizeCanvas() {
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+
+      // 16:9 をベースに、上下にボタン分の余白を考慮
+      const maxCanvasHeight = vh - 110;
+      const ratio = 16 / 9;
+      let w = vw;
+      let h = w / ratio;
+      if (h > maxCanvasHeight) {
+        h = maxCanvasHeight;
+        w = h * ratio;
+      }
+
+      gameWidth = Math.floor(w);
+      gameHeight = Math.floor(h);
+      canvas.width = gameWidth;
+      canvas.height = gameHeight;
+      groundY = Math.floor(gameHeight * 0.85);
+
+      // サンタのX位置だけ、再計算
+      santa.x = gameWidth * 0.25;
+      if (!gameStarted) {
+        santa.y = gameHeight * 0.5;
+      }
+    }
+
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
     // ====== ユーティリティ ======
 
     function clamp(v, min, max) {
@@ -199,6 +200,7 @@
       if (pressed) {
         if (!inputA && !projectile) {
           aPressedAt = performance.now();
+          gameStarted = true; // タッチでもスタート扱い
         }
         inputA = true;
       } else {
@@ -214,42 +216,42 @@
       inputB = pressed;
     }
 
-// キーボード
-window.addEventListener('keydown', (e) => {
-  if (e.repeat) return;
-  
-  if (e.key === 'n' || e.key === 'N') {
-    // Aボタン押した瞬間 → ゲーム開始 & タイマー開始
-    if (!inputA && !projectile) {
-      aPressedAt = performance.now();
-      gameStarted = true;
-    }
-    inputA = true;
+    // キーボード
+    window.addEventListener('keydown', (e) => {
+      if (e.repeat) return;
+      
+      if (e.key === 'n' || e.key === 'N') {
+        // Aボタン押した瞬間 → ゲーム開始 & タイマー開始
+        if (!inputA && !projectile) {
+          aPressedAt = performance.now();
+          gameStarted = true;
+        }
+        inputA = true;
 
-  } else if (e.key === 'm' || e.key === 'M') {
-    // Bボタン
-    inputB = true;
+      } else if (e.key === 'm' || e.key === 'M') {
+        // Bボタン
+        inputB = true;
 
-  } else if (e.key === ' ' && gameOver) {
-    restartGame();
-  }
-});
+      } else if (e.key === ' ' && gameOver) {
+        restartGame();
+      }
+    });
 
-window.addEventListener('keyup', (e) => {
-  if (e.key === 'n' || e.key === 'N') {
-    // Aボタンを離した瞬間 → 投下
-    if (inputA && !projectile) {
-      const duration = performance.now() - aPressedAt;
-      spawnProjectile(duration >= 500);
-    }
-    inputA = false;
+    window.addEventListener('keyup', (e) => {
+      if (e.key === 'n' || e.key === 'N') {
+        // Aボタンを離した瞬間 → 投下
+        if (inputA && !projectile) {
+          const duration = performance.now() - aPressedAt;
+          spawnProjectile(duration >= 500);
+        }
+        inputA = false;
 
-  } else if (e.key === 'm' || e.key === 'M') {
-    inputB = false;
-  }
-});
+      } else if (e.key === 'm' || e.key === 'M') {
+        inputB = false;
+      }
+    });
 
-    // タッチ / マウス（A）
+    // タッチ / マウス
     const addPressEvents = (element, onPressChange) => {
       const down = (ev) => {
         ev.preventDefault();
@@ -273,7 +275,6 @@ window.addEventListener('keyup', (e) => {
     function spawnProjectile(isBomb) {
       // 画面内に1つだけ
       if (projectile) return;
-      gameStarted = true;
 
       const speedX = 4;
       const speedY = -3; // 最初はちょっと上向き
@@ -380,7 +381,6 @@ window.addEventListener('keyup', (e) => {
     // ====== 描画 ======
 
     function drawBackground() {
-      // 空は CSS のグラデで塗ってあるけど、星とか追加したければここ
       // 地面ライン
       ctx.strokeStyle = "rgba(0,0,0,0.4)";
       ctx.lineWidth = 2;
@@ -416,10 +416,6 @@ window.addEventListener('keyup', (e) => {
     }
 
     function drawSanta() {
-      // === PNGに差し替えるときはここを画像描画に変更 ===
-      // 例：
-      // ctx.drawImage(santaImage, santa.x - SANTA_WIDTH/2, santa.y - SANTA_HEIGHT/2, SANTA_WIDTH, SANTA_HEIGHT);
-
       // プレースホルダー（赤いそり＋サンタの頭っぽい丸）
       const left = santa.x - SANTA_WIDTH / 2;
       const top = santa.y - SANTA_HEIGHT / 2;
@@ -563,5 +559,6 @@ window.addEventListener('keyup', (e) => {
     // 初期ビル生成
     ensureBuildings();
   </script>
+
 </body>
 </html>
