@@ -314,26 +314,69 @@
       }
     }
 
-    function updateBuildings(dt) {
-      const speed = physics.scrollSpeed * dt;
-      for (const b of buildings) {
-        b.x -= speed;
+    function updateProjectile(dt) {
+  if (!projectile || !projectile.alive) return;
 
-        // 敵ビルはたまに射撃
-        if (b.isEnemy && gameStarted && !gameOver) {
-          b.shootTimer -= dt;
-          if (b.shootTimer <= 0 && Math.random() < 0.02) {
-            spawnEnemyBullet(b);
-            b.shootTimer = 60 + Math.random() * 120; // 適当クールタイム
-          }
+  // 位置更新
+  projectile.x += projectile.vx * dt;
+  projectile.y += projectile.vy * dt;
+  projectile.vy += physics.gravity * 0.5 * dt;
+
+  const px = projectile.x;
+  const py = projectile.y;
+
+  // 建物との当たり判定
+  for (const b of buildings) {
+    // 爆弾：建物本体に当たったらOK（中心点で判定）
+    if (px >= b.x && px <= b.x + b.w &&
+        py >= b.y && py <= b.y + b.h) {
+
+      if (projectile.isBomb) {
+        if (b.isEnemy) {
+          score += 5;
+          playBeep(220, 120, "sawtooth", 0.25);
+          playBeep(110, 200, "square", 0.25);
+        } else {
+          score -= 1;
+          playBeep(150, 200, "sine", 0.15);
         }
       }
-      // 画面外削除
-      while (buildings.length > 0 && buildings[0].x + buildings[0].w < -50) {
-        buildings.shift();
-      }
-      ensureBuildings();
+
+      projectile.alive = false;
+      projectile = null;
+      return;
     }
+
+    // プレゼント：窓の矩形と判定（ちょっと甘めに）
+    if (!projectile.isBomb) {
+      for (const w of b.windows) {
+        const wx = b.x + w.relX;
+        const wy = b.y + w.relY;
+        const margin = 2; // 当たりやすくするため少し広げる
+
+        if (px >= wx - margin && px <= wx + w.w + margin &&
+            py >= wy - margin && py <= wy + w.h + margin) {
+          score += 1;
+          playBeep(660, 120, "square", 0.25);
+          projectile.alive = false;
+          projectile = null;
+          return;
+        }
+      }
+    }
+  }
+
+  // 画面外に出たら消す
+  if (
+    projectile.x > GAME_WIDTH + 40 ||
+    projectile.y > GAME_HEIGHT + 40 ||
+    projectile.y < -40
+  ) {
+    projectile.alive = false;
+    projectile = null;
+  }
+}
+
 
     function spawnEnemyBullet(b) {
       const bx = b.x + b.w * 0.5;
