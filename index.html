@@ -2,21 +2,17 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <title>Santa Drop (Prototype)</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Santa Drop v0.1</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no" />
   <style>
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
       width: 100%;
       height: 100%;
-      overflow: hidden;
-      background: #02101f;
+      background: #020817;
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      color: #fff;
+      color: #f9fafb;
+      overflow: hidden;
     }
     .game-wrapper {
       position: fixed;
@@ -25,12 +21,13 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
+      gap: 8px;
     }
     #gameCanvas {
-      background: linear-gradient(#031c3a, #0a3158 60%, #0b3b22 60%, #06240f 100%);
-      border-radius: 8px;
+      background: linear-gradient(#031c3a 0%, #0a3158 60%, #0b3b22 60%, #06240f 100%);
+      border-radius: 12px;
       width: 100%;
-      max-width: 800px;
+      max-width: 900px;
       height: auto;
       max-height: calc(100vh - 110px);
       touch-action: none;
@@ -39,44 +36,43 @@
       width: 100%;
       max-width: 600px;
       display: flex;
-      justify-content: space-around;
-      align-items: center;
-      padding: 8px 12px 12px;
+      justify-content: center;
       gap: 16px;
+      padding: 4px 12px 10px;
     }
     .btn {
       flex: 1;
       min-height: 56px;
       border-radius: 999px;
-      border: none;
-      background: #1f2937;
+      border: 2px solid #9ca3af;
+      background: #111827;
       color: #f9fafb;
       font-size: 1.1rem;
       font-weight: 600;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.6);
       touch-action: manipulation;
       -webkit-tap-highlight-color: transparent;
-    }
-    .btn:active {
-      transform: translateY(2px);
-      box-shadow: 0 2px 5px rgba(0,0,0,0.4);
-      background: #374151;
     }
     .btn span.sub {
       display: block;
       font-size: 0.7rem;
-      opacity: 0.75;
+      opacity: 0.8;
+    }
+    .btn:active {
+      transform: translateY(2px);
+      box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+      background: #1f2937;
     }
   </style>
 </head>
 <body>
   <div class="game-wrapper">
-    <!-- 内部論理サイズは 800x450 固定。CSS で縮小表示 -->
+    <!-- 内部論理解像度 800x450 固定 -->
     <canvas id="gameCanvas" width="800" height="450"></canvas>
     <div class="controls">
       <button id="btnA" class="btn">
         A / N
-        <span class="sub">短押し：プレゼント / 長押し：爆弾（予定）</span>
+        <span class="sub">短押し：プレゼント　長押し：爆弾</span>
       </button>
       <button id="btnB" class="btn">
         B / M
@@ -86,47 +82,83 @@
   </div>
 
   <script>
-    // ====== 基本セットアップ ======
-    const canvas = document.getElementById('gameCanvas');
-    const ctx = canvas.getContext('2d');
+    // =========================================
+    //  基本セットアップ
+    // =========================================
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
 
-    const btnA = document.getElementById('btnA');
-    const btnB = document.getElementById('btnB');
+    const btnA = document.getElementById("btnA");
+    const btnB = document.getElementById("btnB");
 
-    const gameWidth = canvas.width;
-    const gameHeight = canvas.height;
-    const groundY = Math.floor(gameHeight * 0.85);
+    const GAME_WIDTH  = canvas.width;   // 800
+    const GAME_HEIGHT = canvas.height;  // 450
+    const GROUND_Y    = Math.floor(GAME_HEIGHT * 0.85);
 
-    // ====== ゲームオブジェクト ======
-    const SANTA_WIDTH = 64;
+    // Audio（効果音）
+    let audioCtx = null;
+    function ensureAudio() {
+      if (!audioCtx) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (AC) audioCtx = new AC();
+      }
+    }
+    function playBeep(freq, durationMs, type = "sine", volume = 0.2) {
+      if (!audioCtx) return;
+      const osc  = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = type;
+      osc.frequency.value = freq;
+      gain.gain.value = volume;
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      const now = audioCtx.currentTime;
+      osc.start(now);
+      osc.stop(now + durationMs / 1000);
+      gain.gain.setValueAtTime(volume, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + durationMs / 1000);
+    }
+
+    // =========================================
+    //  ゲームオブジェクト
+    // =========================================
+    const SANTA_WIDTH  = 64;
     const SANTA_HEIGHT = 48;
     const SANTA_HITBOX_INSET = 0.2;
 
     const santa = {
-      x: Math.floor(gameWidth * 0.25),
-      y: Math.floor(gameHeight * 0.5),
+      x: Math.floor(GAME_WIDTH * 0.25),
+      y: Math.floor(GAME_HEIGHT * 0.5),
       vy: 0
     };
 
     const physics = {
       gravity: 0.25,
-      thrust: 0.4,
+      thrust: 0.45,
       maxVy: 6,
-      scrollSpeed: 2
+      scrollSpeed: 2.5
     };
 
+    /** 建物リスト */
     const buildings = [];
+    /** 敵弾リスト */
+    const enemyBullets = [];
+    /** プレゼント or 爆弾（同時に1つのみ） */
     let projectile = null;
 
+    // 入力状態
     let inputA = false;
     let inputB = false;
     let aPressedAt = 0;
 
-    let gameOver = false;
+    // 状態
+    let gameOver   = false;
     let gameStarted = false;
     let score = 0;
 
-    // ====== ユーティリティ ======
+    // =========================================
+    //  ユーティリティ
+    // =========================================
     function clamp(v, min, max) {
       if (v < min) return min;
       if (v > max) return max;
@@ -134,26 +166,30 @@
     }
 
     function rectsIntersect(a, b) {
-      if (a.x + a.w < b.x) return false;
-      if (a.x > b.x + b.w) return false;
-      if (a.y + a.h < b.y) return false;
-      if (a.y > b.y + b.h) return false;
-      return true;
+      return !(
+        a.x + a.w < b.x ||
+        a.x > b.x + b.w ||
+        a.y + a.h < b.y ||
+        a.y > b.y + b.h
+      );
     }
 
     function getSantaHitbox() {
-      const insetX = SANTA_WIDTH * SANTA_HITBOX_INSET;
+      const insetX = SANTA_WIDTH  * SANTA_HITBOX_INSET;
       const insetY = SANTA_HEIGHT * SANTA_HITBOX_INSET;
       return {
-        x: santa.x - SANTA_WIDTH / 2 + insetX,
-        y: santa.y - SANTA_HEIGHT / 2 + insetY,
-        w: SANTA_WIDTH - insetX * 2,
+        x: santa.x - SANTA_WIDTH /2 + insetX,
+        y: santa.y - SANTA_HEIGHT/2 + insetY,
+        w: SANTA_WIDTH  - insetX * 2,
         h: SANTA_HEIGHT - insetY * 2
       };
     }
 
-    // ====== 入力処理（タッチ / クリック） ======
+    // =========================================
+    //  入力処理（スマホ / マウス）
+    // =========================================
     function setButtonA(pressed) {
+      ensureAudio();
       if (pressed) {
         if (!inputA && !projectile) {
           aPressedAt = performance.now();
@@ -162,107 +198,108 @@
         inputA = true;
       } else {
         if (inputA && !projectile) {
-          const duration = performance.now() - aPressedAt;
-          spawnProjectile(duration >= 500);
+          const dur = performance.now() - aPressedAt;
+          const isBomb = dur >= 500;
+          spawnProjectile(isBomb);
         }
         inputA = false;
       }
     }
 
     function setButtonB(pressed) {
+      ensureAudio();
       inputB = pressed;
+      if (pressed) gameStarted = true;
     }
 
-    function addPressEvents(element, onPressChange) {
-      function down(ev) {
-        ev.preventDefault();
-        onPressChange(true);
-      }
-      function up(ev) {
-        ev.preventDefault();
-        onPressChange(false);
-      }
-      element.addEventListener('pointerdown', down);
-      element.addEventListener('pointerup', up);
-      element.addEventListener('pointerleave', up);
-      element.addEventListener('pointercancel', up);
+    function addPressEvents(elem, handler) {
+      function down(ev) { ev.preventDefault(); handler(true); }
+      function up(ev)   { ev.preventDefault(); handler(false); }
+      elem.addEventListener("pointerdown", down);
+      elem.addEventListener("pointerup", up);
+      elem.addEventListener("pointerleave", up);
+      elem.addEventListener("pointercancel", up);
     }
 
     addPressEvents(btnA, setButtonA);
     addPressEvents(btnB, setButtonB);
 
-    // ====== 入力処理（キーボード） ======
-    window.addEventListener('keydown', function(e) {
+    // =========================================
+    //  入力処理（キーボード）
+    //   Aボタン = N, Bボタン = M
+    // =========================================
+    window.addEventListener("keydown", (e) => {
       if (e.repeat) return;
-
-      if (e.key === 'n' || e.key === 'N') {
+      if (e.key === "n" || e.key === "N") {
+        ensureAudio();
         if (!inputA && !projectile) {
           aPressedAt = performance.now();
           gameStarted = true;
         }
         inputA = true;
-      } else if (e.key === 'm' || e.key === 'M') {
+      } else if (e.key === "m" || e.key === "M") {
+        ensureAudio();
         inputB = true;
-      } else if (e.key === ' ' && gameOver) {
+        gameStarted = true;
+      } else if (e.key === " " && gameOver) {
         restartGame();
       }
     });
 
-    window.addEventListener('keyup', function(e) {
-      if (e.key === 'n' || e.key === 'N') {
+    window.addEventListener("keyup", (e) => {
+      if (e.key === "n" || e.key === "N") {
         if (inputA && !projectile) {
-          const duration = performance.now() - aPressedAt;
-          spawnProjectile(duration >= 500);
+          const dur = performance.now() - aPressedAt;
+          const isBomb = dur >= 500;
+          spawnProjectile(isBomb);
         }
         inputA = false;
-      } else if (e.key === 'm' || e.key === 'M') {
+      } else if (e.key === "m" || e.key === "M") {
         inputB = false;
       }
     });
 
-    // ====== Projectile ======
-    function spawnProjectile(isBomb) {
-      if (projectile !== null) return;
-
-      const speedX = 4;
-      const speedY = -3;
-
-      projectile = {
-        x: santa.x + SANTA_WIDTH * 0.3,
-        y: santa.y - SANTA_HEIGHT * 0.1,
-        vx: speedX,
-        vy: speedY,
-        isBomb: isBomb
-      };
-    }
-
-    function updateProjectile() {
-      if (projectile === null) return;
-      projectile.x += projectile.vx;
-      projectile.y += projectile.vy;
-      projectile.vy += physics.gravity * 0.5;
-
-      if (projectile.x > gameWidth + 50 || projectile.y > gameHeight + 50) {
-        projectile = null;
-      }
-    }
-
-    // ====== 建物生成・更新 ======
+    // =========================================
+    //  建物・窓・敵
+    // =========================================
+    /**
+     * 建物を1つ生成
+     * type: "house" or "enemy"
+     */
     function spawnBuilding() {
-      const minW = 60;
-      const maxW = 140;
-      const minH = 80;
-      const maxH = 220;
-
+      const minW = 80, maxW = 150;
+      const minH = 90, maxH = 220;
       const w = minW + Math.random() * (maxW - minW);
       const h = minH + Math.random() * (maxH - minH);
+      const isEnemy = Math.random() < 0.25; // 25% くらいで敵ビル
 
       const b = {
-        x: gameWidth + w,
+        x: GAME_WIDTH + w,
+        y: GROUND_Y - h,
         w: w,
         h: h,
-        y: groundY - h
+        isEnemy: isEnemy,
+        windows: [],
+        shootTimer: 0
       };
+
+      // 窓リスト（判定用）
+      const rows = 3;
+      const cols = 3;
+      const padX = 14;
+      const padY = 18;
+      const ww = 16;
+      const hh = 18;
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const wx = b.x + padX + c * (ww + 8);
+          const wy = b.y + padY + r * (hh + 10);
+          if (wx + ww < b.x + b.w - 8 && wy + hh < b.y + b.h - 8) {
+            b.windows.push({ relX: wx - b.x, relY: wy - b.y, w: ww, h: hh });
+          }
+        }
+      }
+
       buildings.push(b);
     }
 
@@ -271,130 +308,271 @@
         spawnBuilding();
       } else {
         const last = buildings[buildings.length - 1];
-        if (last.x + last.w < gameWidth) {
+        if (last.x + last.w < GAME_WIDTH) {
           spawnBuilding();
         }
       }
     }
 
-    function updateBuildings() {
-      for (let i = 0; i < buildings.length; i++) {
-        buildings[i].x -= physics.scrollSpeed;
-      }
+    function updateBuildings(dt) {
+      const speed = physics.scrollSpeed * dt;
+      for (const b of buildings) {
+        b.x -= speed;
 
+        // 敵ビルはたまに射撃
+        if (b.isEnemy && gameStarted && !gameOver) {
+          b.shootTimer -= dt;
+          if (b.shootTimer <= 0 && Math.random() < 0.02) {
+            spawnEnemyBullet(b);
+            b.shootTimer = 60 + Math.random() * 120; // 適当クールタイム
+          }
+        }
+      }
+      // 画面外削除
       while (buildings.length > 0 && buildings[0].x + buildings[0].w < -50) {
         buildings.shift();
       }
-
       ensureBuildings();
     }
 
-    // ====== サンタ更新 ======
-    function updateSanta() {
-      if (inputB) {
-        santa.vy -= physics.thrust;
-      } else {
-        santa.vy += physics.gravity;
-      }
-      santa.vy = clamp(santa.vy, -physics.maxVy, physics.maxVy);
-      santa.y += santa.vy;
-
-      const topLimit = 30;
-      const bottomLimit = groundY - SANTA_HEIGHT / 2;
-      santa.y = clamp(santa.y, topLimit, bottomLimit);
-      if (santa.y === topLimit || santa.y === bottomLimit) {
-        santa.vy = 0;
-      }
+    function spawnEnemyBullet(b) {
+      const bx = b.x + b.w * 0.5;
+      const by = b.y + b.h * 0.2;
+      enemyBullets.push({
+        x: bx,
+        y: by,
+        vx: -3,
+        vy: 0.4
+      });
     }
 
-    // ====== 衝突判定 ======
-    function checkCollisions() {
-      const h = getSantaHitbox();
-      for (let i = 0; i < buildings.length; i++) {
-        const b = buildings[i];
-        const rect = { x: b.x, y: b.y, w: b.w, h: b.h };
-        if (rectsIntersect(h, rect)) {
-          gameOver = true;
-          break;
+    function updateEnemyBullets(dt) {
+      const g = 0.05 * dt;
+      for (const bullet of enemyBullets) {
+        bullet.x += bullet.vx * dt;
+        bullet.y += bullet.vy * dt;
+        bullet.vy += g;
+      }
+      for (let i = enemyBullets.length - 1; i >= 0; i--) {
+        const b = enemyBullets[i];
+        if (b.x < -50 || b.y > GAME_HEIGHT + 50) {
+          enemyBullets.splice(i, 1);
         }
       }
     }
 
-    // ====== 描画 ======
+    // =========================================
+    //  サンタ & 弾
+    // =========================================
+    function updateSanta(dt) {
+      if (!gameStarted) return;
+
+      if (inputB) {
+        santa.vy -= physics.thrust * dt;
+      } else {
+        santa.vy += physics.gravity * dt;
+      }
+      santa.vy = clamp(santa.vy, -physics.maxVy, physics.maxVy);
+      santa.y += santa.vy * dt;
+
+      const top = 30;
+      const bottom = GROUND_Y - SANTA_HEIGHT / 2;
+      santa.y = clamp(santa.y, top, bottom);
+      if (santa.y === top || santa.y === bottom) {
+        santa.vy = 0;
+      }
+    }
+
+    function spawnProjectile(isBomb) {
+      if (projectile) return;
+      // サンタの前方から発射
+      projectile = {
+        x: santa.x + SANTA_WIDTH * 0.3,
+        y: santa.y - SANTA_HEIGHT * 0.1,
+        vx: 4.5,
+        vy: -3.0,
+        isBomb: isBomb,
+        alive: true
+      };
+      if (isBomb) {
+        playBeep(90, 160, "square", 0.25);
+      } else {
+        playBeep(440, 120, "triangle", 0.2);
+      }
+    }
+
+    function updateProjectile(dt) {
+      if (!projectile || !projectile.alive) return;
+      projectile.x += projectile.vx * dt;
+      projectile.y += projectile.vy * dt;
+      projectile.vy += physics.gravity * 0.5 * dt;
+
+      // 建物・窓との当たり
+      for (const b of buildings) {
+        const hitRect = { x: projectile.x - 4, y: projectile.y - 4, w: 8, h: 8 };
+
+        // 爆弾で建物本体ヒット
+        const bRect = { x: b.x, y: b.y, w: b.w, h: b.h };
+        if (rectsIntersect(hitRect, bRect)) {
+          if (projectile.isBomb) {
+            if (b.isEnemy) {
+              score += 5;
+              playBeep(220, 120, "sawtooth", 0.25);
+              playBeep(110, 200, "square", 0.25);
+            } else {
+              score -= 1;
+              playBeep(150, 200, "sine", 0.15);
+            }
+          }
+          projectile.alive = false;
+          projectile = null;
+          return;
+        }
+
+        // プレゼントが窓に入る
+        if (!projectile.isBomb) {
+          for (const w of b.windows) {
+            const wx = b.x + w.relX;
+            const wy = b.y + w.relY;
+            const wRect = { x: wx, y: wy, w: w.w, h: w.h };
+            if (rectsIntersect(hitRect, wRect)) {
+              score += 1;
+              playBeep(660, 120, "square", 0.25);
+              projectile.alive = false;
+              projectile = null;
+              return;
+            }
+          }
+        }
+      }
+
+      // 画面外
+      if (
+        projectile.x > GAME_WIDTH + 40 ||
+        projectile.y > GAME_HEIGHT + 40 ||
+        projectile.y < -40
+      ) {
+        projectile.alive = false;
+        projectile = null;
+      }
+    }
+
+    // =========================================
+    //  衝突判定（サンタ死亡）
+    // =========================================
+    function checkCollisions() {
+      if (!gameStarted || gameOver) return;
+      const h = getSantaHitbox();
+
+      // 建物
+      for (const b of buildings) {
+        const r = { x: b.x, y: b.y, w: b.w, h: b.h };
+        if (rectsIntersect(h, r)) {
+          triggerGameOver();
+          return;
+        }
+      }
+
+      // 敵弾
+      for (const bullet of enemyBullets) {
+        const br = { x: bullet.x - 3, y: bullet.y - 3, w: 6, h: 6 };
+        if (rectsIntersect(h, br)) {
+          triggerGameOver();
+          return;
+        }
+      }
+    }
+
+    function triggerGameOver() {
+      if (gameOver) return;
+      gameOver = true;
+      playBeep(200, 220, "sawtooth", 0.3);
+      playBeep(120, 260, "square", 0.25);
+    }
+
+    // =========================================
+    //  描画
+    // =========================================
     function drawBackground() {
-      ctx.strokeStyle = "rgba(0,0,0,0.4)";
+      // 地面ライン
+      ctx.strokeStyle = "rgba(0,0,0,0.5)";
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(0, groundY + 0.5);
-      ctx.lineTo(gameWidth, groundY + 0.5);
+      ctx.moveTo(0, GROUND_Y + 0.5);
+      ctx.lineTo(GAME_WIDTH, GROUND_Y + 0.5);
       ctx.stroke();
     }
 
     function drawBuildings() {
-      for (let i = 0; i < buildings.length; i++) {
-        const b = buildings[i];
-        ctx.fillStyle = "#111827";
+      for (const b of buildings) {
+        // 本体
+        ctx.fillStyle = b.isEnemy ? "#4b1d1d" : "#111827";
         ctx.fillRect(b.x, b.y, b.w, b.h);
 
-        const rows = 4;
-        const cols = 3;
-        const padX = 10;
-        const padY = 12;
-        const ww = 10;
-        const hh = 12;
-        for (let r = 0; r < rows; r++) {
-          for (let c = 0; c < cols; c++) {
-            const wx = b.x + padX + c * (ww + 6);
-            const wy = b.y + padY + r * (hh + 6);
-            if (wx + ww < b.x + b.w - 6) {
-              ctx.fillStyle = "#fbbf24";
-              ctx.fillRect(wx, wy, ww, hh);
-            }
-          }
+        // 屋上フチ
+        ctx.fillStyle = "rgba(0,0,0,0.4)";
+        ctx.fillRect(b.x, b.y, b.w, 6);
+
+        // 窓
+        for (const w of b.windows) {
+          const wx = b.x + w.relX;
+          const wy = b.y + w.relY;
+          ctx.fillStyle = b.isEnemy ? "#f97316" : "#fbbf24";
+          ctx.fillRect(wx, wy, w.w, w.h);
+        }
+
+        // 敵マーク
+        if (b.isEnemy) {
+          ctx.fillStyle = "#fca5a5";
+          ctx.font = "12px system-ui";
+          ctx.fillText("⚠", b.x + b.w / 2 - 4, b.y + 14);
         }
       }
     }
 
     function drawSanta() {
       const left = santa.x - SANTA_WIDTH / 2;
-      const top = santa.y - SANTA_HEIGHT / 2;
+      const top  = santa.y - SANTA_HEIGHT / 2;
 
+      // そり
       ctx.fillStyle = "#b91c1c";
       ctx.fillRect(left, top + SANTA_HEIGHT * 0.35, SANTA_WIDTH, SANTA_HEIGHT * 0.3);
       ctx.fillStyle = "#7f1d1d";
       ctx.fillRect(left, top + SANTA_HEIGHT * 0.6, SANTA_WIDTH, SANTA_HEIGHT * 0.15);
 
+      // サンタ頭
       const headX = santa.x + SANTA_WIDTH * 0.15;
       const headY = santa.y - SANTA_HEIGHT * 0.05;
-      const radius = SANTA_HEIGHT * 0.28;
+      const r = SANTA_HEIGHT * 0.28;
       ctx.fillStyle = "#fee2e2";
       ctx.beginPath();
-      ctx.arc(headX, headY, radius, 0, Math.PI * 2);
+      ctx.arc(headX, headY, r, 0, Math.PI * 2);
       ctx.fill();
 
+      // 帽子
       ctx.fillStyle = "#dc2626";
       ctx.beginPath();
-      ctx.moveTo(headX - radius * 0.6, headY - radius * 0.1);
-      ctx.lineTo(headX + radius * 0.9, headY - radius * 1.4);
-      ctx.lineTo(headX + radius * 0.4, headY + radius * 0.1);
+      ctx.moveTo(headX - r * 0.6, headY - r * 0.1);
+      ctx.lineTo(headX + r * 0.9, headY - r * 1.4);
+      ctx.lineTo(headX + r * 0.4, headY + r * 0.1);
       ctx.closePath();
       ctx.fill();
       ctx.fillStyle = "#fee2e2";
       ctx.beginPath();
-      ctx.arc(headX + radius * 0.9, headY - radius * 1.4, radius * 0.25, 0, Math.PI * 2);
+      ctx.arc(headX + r * 0.9, headY - r * 1.4, r * 0.25, 0, Math.PI * 2);
       ctx.fill();
     }
 
     function drawProjectile() {
-      if (projectile === null) return;
+      if (!projectile) return;
       ctx.save();
       if (projectile.isBomb) {
         ctx.fillStyle = "#111827";
         ctx.beginPath();
-        ctx.arc(projectile.x, projectile.y, 8, 0, Math.PI * 2);
+        ctx.arc(projectile.x, projectile.y, 7, 0, Math.PI * 2);
         ctx.fill();
         ctx.fillStyle = "#9ca3af";
-        ctx.fillRect(projectile.x - 1, projectile.y - 10, 2, 6);
+        ctx.fillRect(projectile.x - 1, projectile.y - 11, 2, 6);
       } else {
         ctx.fillStyle = "#10b981";
         ctx.fillRect(projectile.x - 7, projectile.y - 7, 14, 14);
@@ -410,54 +588,69 @@
       ctx.restore();
     }
 
+    function drawEnemyBullets() {
+      ctx.fillStyle = "#f97316";
+      for (const b of enemyBullets) {
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
     function drawHUD() {
-      ctx.fillStyle = "rgba(0,0,0,0.5)";
-      ctx.fillRect(8, 8, 140, 32);
+      // スコア
+      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      ctx.fillRect(8, 8, 160, 34);
       ctx.fillStyle = "#e5e7eb";
-      ctx.font = "16px system-ui, sans-serif";
+      ctx.font = "16px system-ui";
       ctx.fillText("SCORE: " + score, 16, 30);
 
       if (!gameStarted && !gameOver) {
-        ctx.fillStyle = "rgba(0,0,0,0.55)";
-        ctx.fillRect(gameWidth / 2 - 160, gameHeight / 2 - 40, 320, 80);
+        ctx.fillStyle = "rgba(0,0,0,0.6)";
+        ctx.fillRect(GAME_WIDTH /2 - 190, GAME_HEIGHT/2 - 70, 380, 120);
         ctx.fillStyle = "#f9fafb";
         ctx.textAlign = "center";
-        ctx.font = "18px system-ui, sans-serif";
-        ctx.fillText("A / N でプレゼント投下", gameWidth / 2, gameHeight / 2 - 8);
-        ctx.fillText("B / M で上昇（長押し）", gameWidth / 2, gameHeight / 2 + 16);
+        ctx.font = "18px system-ui";
+        ctx.fillText("N / A：短押しでプレゼント　長押しで爆弾", GAME_WIDTH/2, GAME_HEIGHT/2 - 10);
+        ctx.fillText("M / B：上昇（押している間）", GAME_WIDTH/2, GAME_HEIGHT/2 + 20);
         ctx.textAlign = "start";
       }
 
       if (gameOver) {
         ctx.fillStyle = "rgba(0,0,0,0.7)";
-        ctx.fillRect(gameWidth / 2 - 180, gameHeight / 2 - 70, 360, 140);
+        ctx.fillRect(GAME_WIDTH/2 - 190, GAME_HEIGHT/2 - 70, 380, 130);
         ctx.fillStyle = "#fee2e2";
         ctx.textAlign = "center";
-        ctx.font = "28px system-ui, sans-serif";
-        ctx.fillText("GAME OVER", gameWidth / 2, gameHeight / 2 - 20);
-        ctx.font = "18px system-ui, sans-serif";
-        ctx.fillText("スペース or 画面タップでリスタート", gameWidth / 2, gameHeight / 2 + 18);
+        ctx.font = "28px system-ui";
+        ctx.fillText("GAME OVER", GAME_WIDTH/2, GAME_HEIGHT/2 - 15);
+        ctx.font = "18px system-ui";
+        ctx.fillText("スペース or 画面タップでリスタート", GAME_WIDTH/2, GAME_HEIGHT/2 + 18);
         ctx.textAlign = "start";
       }
     }
 
-    // ====== メインループ ======
+    // =========================================
+    //  メインループ
+    // =========================================
     let lastTime = performance.now();
 
     function gameLoop(now) {
+      const dt = (now - lastTime) / 16.67; // 60fps を1とする
       lastTime = now;
 
-      ctx.clearRect(0, 0, gameWidth, gameHeight);
+      ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
       if (!gameOver) {
-        updateSanta();
-        updateProjectile();
-        updateBuildings();
+        updateSanta(dt);
+        updateProjectile(dt);
+        updateEnemyBullets(dt);
+        updateBuildings(dt);
         checkCollisions();
       }
 
       drawBackground();
       drawBuildings();
+      drawEnemyBullets();
       drawProjectile();
       drawSanta();
       drawHUD();
@@ -465,27 +658,30 @@
       requestAnimationFrame(gameLoop);
     }
 
-    // ====== リスタート ======
+    // =========================================
+    //  リスタート・初期化
+    // =========================================
     function restartGame() {
+      score = 0;
       gameOver = false;
       gameStarted = false;
-      score = 0;
-      santa.y = Math.floor(gameHeight * 0.5);
+      santa.x = Math.floor(GAME_WIDTH * 0.25);
+      santa.y = Math.floor(GAME_HEIGHT * 0.5);
       santa.vy = 0;
       projectile = null;
       buildings.length = 0;
+      enemyBullets.length = 0;
       ensureBuildings();
     }
 
-    // 画面タップでリスタート
-    canvas.addEventListener('pointerdown', function(e) {
+    canvas.addEventListener("pointerdown", (e) => {
       if (gameOver) {
         e.preventDefault();
         restartGame();
       }
     });
 
-    // 初期ビル生成 & ループ開始
+    // 初期化して開始
     ensureBuildings();
     requestAnimationFrame(gameLoop);
   </script>
