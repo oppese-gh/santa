@@ -214,25 +214,40 @@
       inputB = pressed;
     }
 
-    // キーボード
-    window.addEventListener('keydown', (e) => {
-      if (e.repeat) return;
-      if (e.key === 'n' || e.key === 'N') {
-        setButtonA(true);
-      } else if (e.key === 'm' || e.key === 'M') {
-        setButtonB(true);
-      } else if (e.key === ' ' && gameOver) {
-        restartGame();
-      }
-    });
+// キーボード
+window.addEventListener('keydown', (e) => {
+  if (e.repeat) return;
+  
+  if (e.key === 'n' || e.key === 'N') {
+    // Aボタン押した瞬間 → ゲーム開始 & タイマー開始
+    if (!inputA && !projectile) {
+      aPressedAt = performance.now();
+      gameStarted = true;
+    }
+    inputA = true;
 
-    window.addEventListener('keyup', (e) => {
-      if (e.key === 'n' || e.key === 'N') {
-        setButtonA(false);
-      } else if (e.key === 'm' || e.key === 'M') {
-        setButtonB(false);
-      }
-    });
+  } else if (e.key === 'm' || e.key === 'M') {
+    // Bボタン
+    inputB = true;
+
+  } else if (e.key === ' ' && gameOver) {
+    restartGame();
+  }
+});
+
+window.addEventListener('keyup', (e) => {
+  if (e.key === 'n' || e.key === 'N') {
+    // Aボタンを離した瞬間 → 投下
+    if (inputA && !projectile) {
+      const duration = performance.now() - aPressedAt;
+      spawnProjectile(duration >= 500);
+    }
+    inputA = false;
+
+  } else if (e.key === 'm' || e.key === 'M') {
+    inputB = false;
+  }
+});
 
     // タッチ / マウス（A）
     const addPressEvents = (element, onPressChange) => {
